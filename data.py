@@ -25,11 +25,6 @@ class RWAVSDataset(torch.utils.data.Dataset):
         self.split = split
         self.sr = sr
 
-        ### llava text embedding 
-        text_embedding_file = os.path.join(data_root, 'llava_responses', f"embedding_{split}.pkl")
-        with open(text_embedding_file, "rb") as f:
-            self.text_embeddings = pickle.load(f)
-
         clip_len = 0.5 # second
         wav_len = int(2 * clip_len * sr)
 
@@ -39,28 +34,8 @@ class RWAVSDataset(torch.utils.data.Dataset):
         print(f"Split: {split}, sound source: {position}, wav_len: {wav_len}")
 
         # rgb and depth features
-        feats = pickle.load(open(os.path.join(data_root, f"feats_{split}.pkl"), "rb")) # add root -> original
+        feats = pickle.load(open(os.path.join(data_root, f"feats_{split}.pkl"), "rb"))
 
-        ### rasterizer ver.
-        # feats = pickle.load(open(os.path.join(data_root, f"feats_{split}_.pkl"), "rb")) # 내가 만든거
-        ### depth anything ver.
-        # feats = pickle.load(open(os.path.join(data_root + "depth_anything", f"feats_{split}_da.pkl"), "rb"))
-        ### transforms.json ver.
-        #feats = pickle.load(open(os.path.join(data_root + "transforms_json", f"feats_transforms_{split}.pkl"), "rb"))
-        ### blender ver.
-        # feats = pickle.load(open(os.path.join(data_root + "blender", f"feats_blender_{split}.pkl"), "rb"))
-        
-        # # rgb + mask ver. (seg)
-        # feats = pickle.load(open(os.path.join(data_root + "seg", f"feats_rgb_seg_{split}.pkl"), "rb"))
-        
-        # depth + mask ver.
-        # feats = pickle.load(open(os.path.join(data_root + "depth_seg", f"feats_depth_seg_{split}.pkl"), "rb"))
-
-        ### rgb(GT) + depth (upper bound 확인용)
-        # feats = pickle.load(open(os.path.join(data_root + "GT", f"feats_GT_{split}.pkl"), "rb"))
-
-        
-        
         # audio
         if os.path.exists(os.path.join(data_root, "binaural_syn_re.wav")):
             audio_bi, _ = librosa.load(os.path.join(data_root, "binaural_syn_re.wav"), sr=sr, mono=False)
@@ -84,13 +59,9 @@ class RWAVSDataset(torch.utils.data.Dataset):
         transforms_path = os.path.join(data_root, f"transforms_scale_{split}.json")
         transforms = json.loads(open(transforms_path, "r").read())
 
-        # transforms와 feats의 길이 조정 (원래 RWAVS dataset에 있는 transforms_train.json 사용하면 안해도 됨.)
-        # min_length = min(len(feats["rgb"]), len(transforms["camera_path"]))
-        # transforms["camera_path"] = transforms["camera_path"][:min_length]
-
         # data
         data_list = []
-        for item_idx, item in enumerate(transforms["camera_path"]): # item_idx: transforms["camera_path"]에서 현재 처리중인 idx
+        for item_idx, item in enumerate(transforms["camera_path"]):
             pose = np.array(item["camera_to_world"]).reshape(4, 4)
             xy = pose[:2,3]
             ori = pose[:2,2]
@@ -104,18 +75,8 @@ class RWAVSDataset(torch.utils.data.Dataset):
             if no_ori:
                 data["ori"] = 0
 
-            ### feats: pkl에서 불러온 rgb, depth 정보
-            ### data: pos, ori, rgb, depth
-            ### item_idx가 feats["rgb"] 길이를 초과했을 때
-            data["rgb"] = feats["rgb"][item_idx] # item_idx: feats["rgb"]에서 해당하는 index를 가져와서 -> data['rgb']
+            data["rgb"] = feats["rgb"][item_idx]
             data["depth"] = feats["depth"][item_idx]
-            
-            ### llava embedding 추가 ### 
-            image_name = item["file_path"].split('/')[-1]
-            text_embedding = self.text_embeddings.get(image_name)
-
-            data["text_embedding"] = text_embedding # [1024] -> concat 하기 전에 [B, 1024]로 바꿔야 함. 
-
 
             # extract key frames at 1 fps
             time = int(item["file_path"].split('/')[-1].split('.')[0])

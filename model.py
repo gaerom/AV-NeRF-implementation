@@ -16,16 +16,15 @@ class ANeRF(nn.Module):
         super(ANeRF, self).__init__()
         self.conv = conv
         self.freq_num = freq_num
-        self.pos_embedder = embedding_module_log(num_freqs=10, ch_dim=1) # position (x, y)
-        self.freq_embedder = embedding_module_log(num_freqs=10, ch_dim=1) # frequency f
-        ### 63 -> 128-dim
-        self.query_prj = nn.Sequential(nn.Linear(42 + 21, intermediate_ch), nn.ReLU(inplace=True)) # embedding position, frequency -> 결합해서 query로 변환 (해당 위치에서 어떤 주파수의 소리가 들릴지 querying)
+        self.pos_embedder = embedding_module_log(num_freqs=10, ch_dim=1)
+        self.freq_embedder = embedding_module_log(num_freqs=10, ch_dim=1)
+        self.query_prj = nn.Sequential(nn.Linear(42 + 21, intermediate_ch), nn.ReLU(inplace=True))
         self.mix_mlp = MLPwSkip(intermediate_ch, intermediate_ch)
         self.mix_prj = nn.Linear(intermediate_ch, 1)
         self.ori_embedder = Embedding(4, 4, intermediate_ch)
         self.diff_mlp = MLPwSkip(intermediate_ch, intermediate_ch)
         self.diff_prj = nn.Linear(intermediate_ch, 1)
-        self.av_mlp = nn.Sequential(nn.Linear(2048, 512), # rgb + depth feature -> A-NeRF에 통합하려고 -> 2048로 수정 ?
+        self.av_mlp = nn.Sequential(nn.Linear(1024, 512),
                                     nn.ReLU(inplace=True),
                                     nn.Linear(512, intermediate_ch),
                                     nn.ReLU(inplace=True),
@@ -40,45 +39,29 @@ class ANeRF(nn.Module):
         self.p = p
         
     def forward(self, x):
-        # x {"pos", "ori", "depth", "rgb"} + text_embedding
+        # x {"pos", "ori", "depth", "rgb"}
         B = x["pos"].shape[0]
-        pos = self.pos_embedder(x["pos"]) # [B, 42], position: 42-dim
+        pos = self.pos_embedder(x["pos"]) # [B, 42]
         pos = mydropout(pos, p=self.p, training=self.training)
         freq = torch.linspace(-0.99, 0.99, self.freq_num, device=x["pos"].device).unsqueeze(1) # [F, 1]
-        freq = self.freq_embedder(freq) # [F, 21] # frequency: 21-dim
+        freq = self.freq_embedder(freq) # [F, 21]
 
         pos = einops.repeat(pos, "b c -> b f c", f=self.freq_num)
         freq = einops.repeat(freq, "f c -> b f c", b=B)
         query = torch.cat([pos, freq], dim=2) # [B, F, ?]
         query = self.query_prj(query) # [B, F, ?]
 
-
-        ### llava에서 뽑아낸 feature concat 하려면 여기서 해야 할 듯 -> x["rgb"], x["depth"] 차원도 확인해보기
-        ### x["rgb"]: [32, 512] / x["depth"]: [32, 512]
-        """
-        x["text_embedding"] load 하기 전에 차원 [B, 1024] 로 맞춰야 함.
-        
-        """
-        # print('with llava text embedding..')
-        text_embedding_batch = x["text_embedding"]
-        v_feats = torch.cat([x["rgb"], x["depth"]], dim=1) # [B, 2048]
-        # v_feats = torch.cat([x["rgb"], x["depth"]], dim=1) # [B, 1024] rgb, depth image feature
-
-        ### llava feature와 concat
-        v_feats_t = torch.cat([v_feats, text_embedding_batch], dim=1)
-
-
-
+        v_feats = torch.cat([x["rgb"], x["depth"]], dim=1) # [B, 1024]
         if self.training:
-            noise = torch.randn_like(v_feats_t) * 0.1 
-            v_feats_t = v_feats_t + noise
-        v_feats_t = self.av_mlp(v_feats_t) # [B, ?] # MLP 통과한 visual feature
-        v_feats_t = mydropout(v_feats_t, p=self.p, training=self.training)
-        v_feats_t = einops.repeat(v_feats_t, "b c -> b 1 c") # frequency query 차원이랑 맞춰주기 위해?
+            noise = torch.randn_like(v_feats) * 0.1
+            v_feats = v_feats + noise
+        v_feats = self.av_mlp(v_feats) # [B, ?]
+        v_feats = mydropout(v_feats, p=self.p, training=self.training)
+        v_feats = einops.repeat(v_feats, "b c -> b 1 c")
 
         # predict mix mask
-        feats = self.mix_mlp(query + v_feats_t)   ### embedding 처리 된 position, frequency -> query로 결합 -> (v_feats + query)가 1st MLP 통과 => feats 생성 
-        mask_mix = self.mix_prj(feats).squeeze(-1) # [B, F], 1-dim -> mask, 마지막 dim 제거
+        feats = self.mix_mlp(query + v_feats)
+        mask_mix = self.mix_prj(feats).squeeze(-1) # [B, F]
 
         # predict diff mask
         ori = self.ori_embedder(x["ori"])
