@@ -1,0 +1,47 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python Debugger:feature_extractor",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/feature_extractor.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "env": {
+                "CUDA_VISIBLE_DEVICES": "0"}
+        }, 
+        {
+            "name": "Python Debugger:main",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/main.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "env": {
+                "CUDA_VISIBLE_DEVICES": "0"},
+            "args": [
+                "--data-root", "/mnt/storage1/AV-NeRF/release/7/",
+                "--log-dir", "./logs_llava_test/7/audio_output/",
+                "--output-dir", "anerf/reproduce/",
+                "--conv",
+                "--lr", "5e-4",
+                "--max-epoch", "100"
+            ]
+        },
+        {
+            "name": "Python Debugger:visualization",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/visualization.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "env": {
+                "CUDA_VISIBLE_DEVICES": "0"},
+            
+        }
+    ]
+}
