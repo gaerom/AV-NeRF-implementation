@@ -358,7 +358,7 @@ class SoundSpacesEvaluator(object):
 
         ## Waveform related
         # Compute t60 error, edt and c50 on gt from file
-        t60s_gt, t60s_prd = compute_t60(wav_gt_ff, wav_prd, fs=self.fs) # utils.py
+        t60s_gt, t60s_prd = compute_t60(wav_gt_ff, wav_prd, fs=self.fs) # 위에 있는 함수 self로 호출해야 하는거 아닌가
         t60s = np.concatenate((t60s_gt, t60s_prd))
         t60s = np.expand_dims(t60s, axis=0)
         diff = np.abs(t60s[:,n_ch:]-t60s[:,:n_ch])/np.abs(t60s[:,:n_ch])

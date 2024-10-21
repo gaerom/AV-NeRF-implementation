@@ -26,7 +26,7 @@ if __name__ == "__main__":
     for env_name, env_id in env_dict.items():
         loss_list = []
         for i in env_id:
-            log_path = os.path.join(args.log_dir, f"{i}/audio_output/", args.output_dir, "eval_loss.pkl")
+            log_path = os.path.join(args.log_dir, f"{i}/audio_output/", args.output_dir, "eval_loss_.pkl")
             try:
                 loss = pickle.load(open(log_path, "rb"))
                 if args.best:
@@ -64,3 +64,10 @@ if __name__ == "__main__":
     result[1::2] = result_copy[::2]
     print(" & ".join(result))
     print("===================================")
+
+
+
+    # 여기서 SoundSpaces에 대한 metric 출력하도록
+    # Replica 6개 scene에 대한 평균? 
+
+    
