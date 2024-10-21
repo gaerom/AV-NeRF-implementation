@@ -94,7 +94,7 @@ class ANeRF(nn.Module):
         return {"mask_mix": mask_mix, 
                 "mask_diff": mask_diff,
                 "reconstr_mono": reconstr_mono,
-                "reconstr": reconstr}
+                "reconstr": reconstr} # output
 
 class Embedding(nn.Module):
     def __init__(self, num_layer, num_embed, ch):
