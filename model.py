@@ -40,12 +40,12 @@ class ANeRF(nn.Module):
         self.p = p
         
     def forward(self, x):
-        # x {"pos", "ori", "depth", "rgb"} + text_embedding
+        # x {"pos", "ori", "depth", "rgb"}
         B = x["pos"].shape[0]
-        pos = self.pos_embedder(x["pos"]) # [B, 42], position: 42-dim
+        pos = self.pos_embedder(x["pos"]) # [B, 42], position: 42 dim
         pos = mydropout(pos, p=self.p, training=self.training)
         freq = torch.linspace(-0.99, 0.99, self.freq_num, device=x["pos"].device).unsqueeze(1) # [F, 1]
-        freq = self.freq_embedder(freq) # [F, 21] # frequency: 21-dim
+        freq = self.freq_embedder(freq) # [F, 21] # frequency: 21 dim
 
         pos = einops.repeat(pos, "b c -> b f c", f=self.freq_num)
         freq = einops.repeat(freq, "f c -> b f c", b=B)
@@ -60,46 +60,54 @@ class ANeRF(nn.Module):
         
         """
         # print('with llava text embedding..')
-        text_embedding_batch = x["text_embedding"]
-        v_feats = torch.cat([x["rgb"], x["depth"]], dim=1) # [B, 2048]
-        # v_feats = torch.cat([x["rgb"], x["depth"]], dim=1) # [B, 1024] rgb, depth image feature
+        # text_embedding_batch = x["text_embedding"]
+        v_feats = torch.cat([x["rgb"], x["depth"]], dim=1) # [B, 1024]
 
         ### llava feature와 concat
-        v_feats_t = torch.cat([v_feats, text_embedding_batch], dim=1)
+        # v_feats_t = torch.cat([v_feats, text_embedding_batch], dim=1)
 
 
 
         if self.training:
-            noise = torch.randn_like(v_feats_t) * 0.1 
-            v_feats_t = v_feats_t + noise
-        v_feats_t = self.av_mlp(v_feats_t) # [B, ?] # MLP 통과한 visual feature
-        v_feats_t = mydropout(v_feats_t, p=self.p, training=self.training)
-        v_feats_t = einops.repeat(v_feats_t, "b c -> b 1 c") # frequency query 차원이랑 맞춰주기 위해?
+            noise = torch.randn_like(v_feats) * 0.1 
+            v_feats = v_feats + noise
+        v_feats = self.av_mlp(v_feats) # [B, ?] # MLP 통과한 visual feature
+        v_feats = mydropout(v_feats, p=self.p, training=self.training)
+        v_feats = einops.repeat(v_feats, "b c -> b 1 c") # frequency query 차원이랑 맞춰주기 위해?
 
         # predict mix mask
-        feats = self.mix_mlp(query + v_feats_t)   ### embedding 처리 된 position, frequency -> query로 결합 -> (v_feats + query)가 1st MLP 통과 => feats 생성 
+        feats = self.mix_mlp(query + v_feats)   ### embedding 처리 된 position, frequency -> query로 결합 -> (v_feats + query)가 1st MLP 통과 => feats 생성 
         mask_mix = self.mix_prj(feats).squeeze(-1) # [B, F], 1-dim -> mask, 마지막 dim 제거
 
         # predict diff mask
         ori = self.ori_embedder(x["ori"])
         ori = mydropout(ori, p=self.p, training=self.training)
-        feats = self.diff_mlp(feats, ori)
+        feats = self.diff_mlp(feats, ori) # 1st mlp feature + ori -> 방향 정보를 고려
         mask_diff = self.diff_prj(feats).squeeze(-1) # [B, F]
-        mask_diff = torch.sigmoid(mask_diff) * 2 - 1
+        mask_diff = torch.sigmoid(mask_diff) * 2 - 1 # [-1, 0, 1]
 
         time_dim = x["mag_sc"].shape[1]
-        mask_mix = einops.repeat(mask_mix, "b f -> b t f", t=time_dim)
-        mask_diff = einops.repeat(mask_diff, "b f -> b t f", t=time_dim)
-        reconstr_mono = x["mag_sc"] * mask_mix # [B, T, F]
-        reconstr_diff = reconstr_mono * mask_diff # [B, T, F]
-        reconstr_left = reconstr_mono + reconstr_diff
-        reconstr_right = reconstr_mono - reconstr_diff
+        mask_mix = einops.repeat(mask_mix, "b f -> b t f", t=time_dim) # STFT한 magnitude랑 결합해야 하니까 차원 변경
+        mask_diff = einops.repeat(mask_diff, "b f -> b t f", t=time_dim) 
+        
+        ### IID는 반영, ITD는 X (ITD 계산을 위해서는 time delay 반영)
+        reconstr_mono = x["mag_sc"] * mask_mix # [B, T, F], s_m 생성하는 부분
+        reconstr_diff = reconstr_mono * mask_diff # [B, T, F], s_d 생성하는 부분
+        
+        ### 만약 time delay를 반영한다면 
+        """
+        1. sample 단위로 time delay 계산 (sr=22050)
+        2. (소리가 왼쪽에서 오는 경우) reconstr_left는 그대로, reconstr_right에는 time delay를 추가하는 방식
+        -> 소리 방향 정보에 따른(x["ori"]) 방향 정보에 따라 ITD 계산 -> 한쪽 귀에 time delay를 추가하는 방식
+        """
+        reconstr_left = reconstr_mono + reconstr_diff # s_m + s_d 
+        reconstr_right = reconstr_mono - reconstr_diff # s_m - s_d
         
         if self.conv:
             left_input = torch.stack([x["mag_sc"], mask_mix, mask_diff, reconstr_left], dim=1) # [B, 4, T, F]
             right_input = torch.stack([x["mag_sc"], mask_mix, -mask_diff, reconstr_right], dim=1) # [B, 4, T, F]
-            left_output = self.post_process(left_input).squeeze(1)
-            right_output = self.post_process(right_input).squeeze(1)
+            left_output = self.post_process(left_input).squeeze(1) # Conv2D 
+            right_output = self.post_process(right_input).squeeze(1) # Conv2D
             reconstr_left = reconstr_left + left_output
             reconstr_right = reconstr_right + right_output
             reconstr = torch.stack([reconstr_left, reconstr_right], dim=1) # [B, 2, T, F]
@@ -111,7 +119,7 @@ class ANeRF(nn.Module):
         return {"mask_mix": mask_mix, 
                 "mask_diff": mask_diff,
                 "reconstr_mono": reconstr_mono,
-                "reconstr": reconstr}
+                "reconstr": reconstr} # ISTFT에 들어가는 input?
 
 class Embedding(nn.Module):
     def __init__(self, num_layer, num_embed, ch):
@@ -119,6 +127,7 @@ class Embedding(nn.Module):
         self.embeds = nn.Parameter(torch.randn(num_embed, num_layer, ch) / math.sqrt(ch), requires_grad=True)
         self.num_embed = num_embed
     
+    # linear interpolation
     def forward(self, ori):
         embeds = torch.cat([self.embeds[-1:], self.embeds, self.embeds[:1]], dim=0)
         ori = (ori + 1) / 2 * self.num_embed

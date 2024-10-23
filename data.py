@@ -147,7 +147,7 @@ class RWAVSDataset(torch.utils.data.Dataset):
             spec_sc = stft(audio_sc_clip) # (173, 257)
             mag_sc = np.abs(spec_sc) # [T, F], 1-channel
             phase_sc = np.angle(spec_sc) # [T, F]
-            data["mag_sc"] = mag_sc # 나중에 mask가 결합될 부분(?_
+            data["mag_sc"] = mag_sc # 나중에 mask가 결합될 부분(?)
 
             data["wav_bi"] = audio_bi_clip
             data["phase_bi"] = phase_bi
@@ -160,7 +160,7 @@ class RWAVSDataset(torch.utils.data.Dataset):
         self.data_list = data_list
 
     def __getitem__(self, index):
-        return self.data_list[index]
+        return self.data_list[index] # x에 해당하는 data를 return
 
     def __len__(self):
         return len(self.data_list)
