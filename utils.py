@@ -87,13 +87,22 @@ class Evaluator(object):
         return [mag_loss, env_loss, snr_loss, snr_norm_loss]
 
     def report(self):
-        item_len = len(self.mag_loss)
+        # item_len = len(self.mag_loss)
+        # return {
+        #         "env": sum(self.env_loss) / item_len,
+        #         "mag": sum(self.mag_loss) / item_len,
+        #         "snr": sum(self.snr_loss) / item_len,
+        #         "snr_norm": sum(self.snr_norm_loss) / item_len
+        #         }
+
+        item_len = len(self.t60_error_list)
+
         return {
-                "env": sum(self.env_loss) / item_len,
-                "mag": sum(self.mag_loss) / item_len,
-                "snr": sum(self.snr_loss) / item_len,
-                "snr_norm": sum(self.snr_norm_loss) / item_len
-                }
+            "audio_T60_mean_error": sum(self.t60_error_list) / item_len,
+            "audio_total_invalids_T60": sum(self.invalid_t60_list),  # T60의 invalid 값 개수
+            "audio_EDT_mean": sum(self.edt_list) / item_len,  # EDT의 평균
+            "audio_C50_mean": sum(self.c50_list) / item_len  # C50의 평균
+        }
     
     def STFT_L2_distance(self, predicted_binaural, gt_binaural):
         #channel1
@@ -214,55 +223,118 @@ def myhibert(x, axis=1):
 class SoundSpacesEvaluator(object):
     def __init__(self, fs=22050):
         self.fs = fs # sample rate
+        self.t60_error_list = []
+        self.invalid_t60_list = []
+        self.edt_list = []
+        self.c50_list = []
     
-    def get_full_metrics(self, mag_prd, mag_gt, wav_gt_ff, wav_pred_istft, wav_gt_istft,  log_prd, log_gt):#, gl=False):
+    # def get_full_metrics(self, mag_prd, mag_gt, wav_gt_ff, wav_pred_istft, wav_gt_istft,  log_prd, log_gt):#, gl=False):
         
-        wav_prd = wav_pred_istft
-        wav_gt = wav_gt_istft
-        n_ch = wav_gt.shape[0]
+    #     wav_prd = wav_pred_istft
+    #     wav_gt = wav_gt_istft
+    #     n_ch = wav_gt.shape[0]
 
-        # Zero pad waveform to be the same size as gt ff (i.e., max_len * hop_len )
-        wav_prd = np.pad(wav_prd, ((0,0),(0, wav_gt_ff.shape[1]-wav_prd.shape[1])), 'constant', constant_values=(0,0))
-        wav_gt = np.pad(wav_gt, ((0,0),(0, wav_gt_ff.shape[1]-wav_gt.shape[1])), 'constant', constant_values=(0,0))
+    #     # Zero pad waveform to be the same size as gt ff (i.e., max_len * hop_len )
+    #     wav_prd = np.pad(wav_prd, ((0,0),(0, wav_gt_ff.shape[1]-wav_prd.shape[1])), 'constant', constant_values=(0,0))
+    #     wav_gt = np.pad(wav_gt, ((0,0),(0, wav_gt_ff.shape[1]-wav_gt.shape[1])), 'constant', constant_values=(0,0))
 
-        ## Waveform related
-        # Compute t60 error, edt and c50 on gt from file
-        t60s_gt, t60s_prd = compute_t60(wav_gt_ff, wav_prd, fs=self.fs)
+    #     ## Waveform related
+    #     # Compute t60 error, edt and c50 on gt from file
+    #     t60s_gt, t60s_prd = compute_t60(wav_gt_ff, wav_prd, fs=self.fs)
+    #     t60s = np.concatenate((t60s_gt, t60s_prd))
+    #     t60s = np.expand_dims(t60s, axis=0)
+    #     diff = np.abs(t60s[:,n_ch:]-t60s[:,:n_ch])/np.abs(t60s[:,:n_ch])
+    #     mask = np.any(t60s<-0.5, axis=1)
+    #     diff = np.mean(diff, axis=1)
+    #     diff[mask] = 1
+    #     mean_t60error = np.mean(diff)*100
+    #     invalid = np.sum(mask)
+        
+    #     edt_gt, edt_prd = evaluate_edt(wav_prd, wav_gt_ff, fs=self.fs)
+    #     edts = np.concatenate((edt_gt, edt_prd))
+    #     edt_instance = np.abs(edts[n_ch:]-edts[:n_ch]) # pred-gt
+    #     mean_edt = np.mean(edt_instance, axis=0) # mean over instance channels
+
+    #     c50_gt, c50_prd = evaluate_clarity(wav_prd, wav_gt_ff, fs=self.fs)
+    #     c50s = np.concatenate((c50_gt, c50_prd))
+    #     c50_instance = np.abs(c50s[n_ch:]-c50s[:n_ch]) # pred-gt
+    #     mean_c50 = np.mean(c50_instance, axis=0) # mean over instance channels
+
+    #     res = {
+    #             "audio_T60_mean_error": mean_t60error,
+    #             "audio_total_invalids_T60": invalid,
+    #             "audio_EDT": mean_edt,
+    #             "audio_C50": mean_c50,
+    #             }
+        
+    #     for key in res.keys():
+    #         #if tensor go to numpy
+    #         if isinstance(res[key], torch.Tensor):
+    #             res[key] = res[key].item()
+    #         else:
+    #             res[key] = float(res[key])
+
+    #     return res
+    def get_full_metrics(self, mag_prd, mag_gt, wav_gt_ff, wav_pred, wav_gt, log_prd, log_gt):
+        ### wav_pred: [1, 2, 22050], wav_gt_ff: [1, 2, 257, 59]
+        wav_prd = wav_pred  # 예측 오디오 신호
+        wav_gt = wav_gt  # Ground truth 오디오 신호
+        n_ch = wav_gt.shape[1]
+
+        # wav_gt_ff는 주파수-시간 도메인 정보이므로, 이를 시간 도메인으로 변환 (ISTFT)
+        wav_gt_ff_istft = []
+        for i in range(n_ch):  # 각 채널에 대해 ISTFT 수행
+            stft_ch = wav_gt_ff[0, i, :, :]
+            wav_ch = librosa.istft(stft_ch, hop_length=128, win_length=512)
+            wav_gt_ff_istft.append(wav_ch)
+
+        wav_gt_ff_istft = np.array(wav_gt_ff_istft)  # [2, time]
+
+        # Zero pad 예측 신호와 ISTFT 변환된 ground truth 신호의 길이를 맞춤
+        target_len = max(wav_prd.shape[-1], wav_gt_ff_istft.shape[-1])
+        wav_prd = np.pad(wav_prd, ((0,0),(0,0),(0, target_len - wav_prd.shape[-1])), 'constant', constant_values=(0,0))
+        wav_gt_ff_istft = np.pad(wav_gt_ff_istft, ((0,0), (0, target_len - wav_gt_ff_istft.shape[-1])), 'constant', constant_values=(0,0))
+
+        ## Waveform 관련 계산
+        # T60, EDT, C50 지표 계산
+        t60s_gt, t60s_prd = compute_t60(wav_gt_ff_istft, wav_prd[0], fs=self.fs)
         t60s = np.concatenate((t60s_gt, t60s_prd))
         t60s = np.expand_dims(t60s, axis=0)
-        diff = np.abs(t60s[:,n_ch:]-t60s[:,:n_ch])/np.abs(t60s[:,:n_ch])
-        mask = np.any(t60s<-0.5, axis=1)
+        diff = np.abs(t60s[:,n_ch:] - t60s[:,:n_ch]) / np.abs(t60s[:,:n_ch])
+        mask = np.any(t60s < -0.5, axis=1)
         diff = np.mean(diff, axis=1)
         diff[mask] = 1
-        mean_t60error = np.mean(diff)*100
+        mean_t60error = np.mean(diff) * 100
         invalid = np.sum(mask)
         
-        edt_gt, edt_prd = evaluate_edt(wav_prd, wav_gt_ff, fs=self.fs)
+        # EDT 계산
+        edt_gt, edt_prd = evaluate_edt(wav_prd[0], wav_gt_ff_istft, fs=self.fs)
         edts = np.concatenate((edt_gt, edt_prd))
-        edt_instance = np.abs(edts[n_ch:]-edts[:n_ch]) # pred-gt
-        mean_edt = np.mean(edt_instance, axis=0) # mean over instance channels
+        edt_instance = np.abs(edts[n_ch:] - edts[:n_ch])  # 예측과 ground truth의 차이
+        mean_edt = np.mean(edt_instance, axis=0)  # 채널별 평균
 
-        c50_gt, c50_prd = evaluate_clarity(wav_prd, wav_gt_ff, fs=self.fs)
+        # C50 계산
+        c50_gt, c50_prd = evaluate_clarity(wav_prd[0], wav_gt_ff_istft, fs=self.fs)
         c50s = np.concatenate((c50_gt, c50_prd))
-        c50_instance = np.abs(c50s[n_ch:]-c50s[:n_ch]) # pred-gt
-        mean_c50 = np.mean(c50_instance, axis=0) # mean over instance channels
+        c50_instance = np.abs(c50s[n_ch:] - c50s[:n_ch])  # 예측과 ground truth의 차이
+        mean_c50 = np.mean(c50_instance, axis=0)  # 채널별 평균
 
         res = {
-                "audio_T60_mean_error": mean_t60error,
-                "audio_total_invalids_T60": invalid,
-                "audio_EDT": mean_edt,
-                "audio_C50": mean_c50,
-                }
-        
+            "audio_T60_mean_error": mean_t60error,
+            "audio_total_invalids_T60": invalid,
+            "audio_EDT": mean_edt,
+            "audio_C50": mean_c50,
+        }
+
         for key in res.keys():
-            #if tensor go to numpy
+            # 텐서인 경우 numpy로 변환
             if isinstance(res[key], torch.Tensor):
                 res[key] = res[key].item()
             else:
                 res[key] = float(res[key])
 
         return res
-        
+    
     
     def get_stft_metrics(self,mag_prd,mag_gt):
         ## STFT related

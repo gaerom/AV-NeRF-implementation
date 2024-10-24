@@ -14,24 +14,24 @@
             "env": {
                 "CUDA_VISIBLE_DEVICES": "0"}
         }, 
-        {
-            "name": "Python Debugger:main",
-            "type": "debugpy",
-            "request": "launch",
-            "program": "${workspaceFolder}/main.py",
-            "console": "integratedTerminal",
-            "justMyCode": false,
-            "env": {
-                "CUDA_VISIBLE_DEVICES": "0"},
-            "args": [
-                "--data-root", "/mnt/storage1/AV-NeRF/release/7/",
-                "--log-dir", "./logs_llava_test/7/audio_output/",
-                "--output-dir", "anerf/reproduce/",
-                "--conv",
-                "--lr", "5e-4",
-                "--max-epoch", "100"
-            ]
-        },
+        // {
+        //     "name": "Python Debugger:main",
+        //     "type": "debugpy",
+        //     "request": "launch",
+        //     "program": "${workspaceFolder}/main.py",
+        //     "console": "integratedTerminal",
+        //     "justMyCode": false,
+        //     "env": {
+        //         "CUDA_VISIBLE_DEVICES": "0"},
+        //     "args": [
+        //         "--data-root", "/mnt/storage1/AV-NeRF/release/7/",
+        //         "--log-dir", "./logs_llava_test/7/audio_output/",
+        //         "--output-dir", "anerf/reproduce/",
+        //         "--conv",
+        //         "--lr", "5e-4",
+        //         "--max-epoch", "100"
+        //     ]
+        // },
         {
             "name": "Python Debugger:visualization",
             "type": "debugpy",
@@ -42,6 +42,17 @@
             "env": {
                 "CUDA_VISIBLE_DEVICES": "0"},
             
-        }
+        },
+        {
+            "name": "Python Debugger:main",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/main.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "env": {
+                "CUDA_VISIBLE_DEVICES": "0"},
+
+        },
     ]
 }

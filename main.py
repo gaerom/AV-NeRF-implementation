@@ -147,7 +147,7 @@ def parse_args():
     parser = argparse.ArgumentParser()
 
     parser.add_argument('--log-dir', type=str, default="logs_ss")
-    parser.add_argument('--output-dir', type=str)
+    parser.add_argument('--output-dir', type=str, default='output_rirs')
     parser.add_argument('--result-dir', type=str, default="results/")
     parser.add_argument('--resume-path', type=str)
     parser.add_argument('--best-ckpt', type=str)
@@ -203,8 +203,8 @@ def main():
     model.to(device)
 
     data_root = args.data_root
-    data_loader = SoundSpaces(dataset_dir=os.path.join(data_root, "apartment_1/binaural_magnitudes_sr22050"), 
-                              split_file=os.path.join(data_root, "apartment_1/metadata_AudioNeRF/split.json"))
+    data_loader = SoundSpaces(dataset_dir=os.path.join(data_root, "apartment_test/binaural_magnitudes_sr22050"), 
+                              split_file=os.path.join(data_root, "apartment_test/metadata_AudioNeRF/split.json"))
     
     if args.eval:
         val_data = data_loader.load_data(split='test')  
@@ -231,8 +231,8 @@ def main():
     else:
         train_data = data_loader.load_data(split='train') # len(train_data): 12391
         val_data = data_loader.load_data(split='test')  # 12391?
-        train_dataloader = torch.utils.data.DataLoader(train_data, batch_size=args.batch_size, num_workers=args.num_workers, shuffle=True, drop_last=True, pin_memory=True)
-        val_dataloader = torch.utils.data.DataLoader(val_data, batch_size=args.batch_size, num_workers=args.num_workers, shuffle=False, drop_last=False, pin_memory=True)
+        train_dataloader = torch.utils.data.DataLoader(train_data, batch_size=args.batch_size, num_workers=args.num_workers, shuffle=True, drop_last=True, pin_memory=False)
+        val_dataloader = torch.utils.data.DataLoader(val_data, batch_size=args.batch_size, num_workers=args.num_workers, shuffle=False, drop_last=False, pin_memory=False)
 
 
         if args.resume_path:

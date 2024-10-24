@@ -17,10 +17,11 @@ class ANeRF(nn.Module):
         self.visual = visual
         self.relative = relative
         self.pos_embedder = embedding_module_log(num_freqs=10, ch_dim=1)
-        self.register_buffer("times", 2*torch.arange(0, 15000)/15000 - 1.0) # [-1.0, 1.0] normalization
+        self.register_buffer("times", 2*torch.arange(0, 22050)/22050 - 1.0) # [-1.0, 1.0] normalization, default: 15000
         self.time_embedder = embedding_module_log(num_freqs=10, ch_dim=1)
 
-        self.query_prj = nn.Sequential(nn.Linear(42 + 42 + 21, intermediate_ch), nn.ReLU(inplace=False)) # source, target, time
+        # self.query_prj = nn.Sequential(nn.Linear(42 + 42 + 21, intermediate_ch), nn.ReLU(inplace=False)) # source, target, time
+        self.query_prj = nn.Sequential(nn.Linear(63 + 63 + 63, intermediate_ch), nn.ReLU(inplace=False))
         self.mix_mlp = MLPwSkip(intermediate_ch, intermediate_ch)
 
         if relative:
@@ -28,7 +29,8 @@ class ANeRF(nn.Module):
             self.diff_mlp = MLPwSkip(intermediate_ch, intermediate_ch)
         else: # False
             self.ori_embedder = embedding_module_log(num_freqs=10, ch_dim=1)
-            self.diff_mlp = MLPwSkip(intermediate_ch + 21, intermediate_ch)
+            # self.diff_mlp = MLPwSkip(intermediate_ch + 21, intermediate_ch)
+            self.diff_mlp = MLPwSkip(intermediate_ch + 63, intermediate_ch)
 
         self.diff_prj = nn.Linear(intermediate_ch, 1) # 왼쪽, 오른쪽 귀 사이 binaural 신호 차이
 
@@ -47,20 +49,29 @@ class ANeRF(nn.Module):
     def forward(self, x):
         # RWAVS x {"pos", ori, rgb, depth, mag_sc}
         # SoundSpaces x {"source", "target(listener)", "ori(listener head)", "wav_len", "vision"}
-        B = x["source"].shape[0] # split.json
-        x["ori"] = x["ori"].float() # split.json[0, 90, 180, 270]
+        # source: source_pose, target: mic_pose, ori: rot, wav_len: X
 
-        source = self.pos_embedder(x["source"]) # [B, 42]
-        target = self.pos_embedder(x["target"]) # [B, 42]
-        max_len = x["wav_len"].max()
-        time = self.times[:max_len].unsqueeze(1) # [T, 1]
-        time = self.time_embedder(time) # [T, 21]
+        B = x["source_pose"].shape[0]
+        x["rot"] = x["rot"].float()
 
-        source = einops.repeat(source, "b c -> b t c", t=max_len)
-        target = einops.repeat(target, "b c -> b t c", t=max_len)
-        time = einops.repeat(time, "t c -> b t c", b=B)
-        query = torch.cat([source, target, time], dim=2) # [B, t, ?]
-        query = self.query_prj(query) # [B, t, ?]
+
+        source = self.pos_embedder(x["source_pose"]) # [B, 42] / [B, 63]
+        target = self.pos_embedder(x["mic_pose"]) # [B, 42] / [B, 63]
+        # max_len = x["wav_len"].max()
+        max_len = 22050
+        time = self.times[:max_len].unsqueeze(1) # [T, 1] / [15000, 1]
+        time = self.time_embedder(time) # [T, 21] / [15000, 21]
+        
+
+        source = einops.repeat(source, "b c -> b t c", t=max_len) # [1, 22050, 63]
+        target = einops.repeat(target, "b c -> b t c", t=max_len) # [1, 22050, 63]
+        time = einops.repeat(time, "t c -> b t c", b=B) # [1, 22050, 21]
+
+        time_padded = torch.nn.functional.pad(time, (0, 63 - time.shape[2])) # add [1, 22050, 63]
+    
+        query = torch.cat([source, target, time_padded], dim=2) # [B, t, ?] / [B, 22050, 189]
+        query = self.query_prj(query) # [B, t, ?] / [1, 22050, 256]
+        
 
         if self.visual:
             v_feats = x["vision"] # [B, 1024]
@@ -70,22 +81,23 @@ class ANeRF(nn.Module):
         if self.visual:
             feats_in = self.mix_mlp(query, v_feats) # (source, target, time) + visual feature
         else: # 일단 vision 없이
-            feats_in = self.mix_mlp(query)
+            feats_in = self.mix_mlp(query) # [1, 22050, 256]
         
         #ori = self.ori_embedder(x["ori"])
         #feats = self.diff_mlp(feats_in, v_feats + self.left_embed.unsqueeze(0))
         #prd_left_wav = self.diff_prj(feats).squeeze(-1) # [B, T]
         channel_embed = einops.repeat(self.left_embed, "l c -> b l c", b=B) ### left
         if self.relative:
-            ori = self.ori_embedder(x["ori"])
+            ori = self.ori_embedder(x["rot"])
             if self.visual:
                 feats = self.diff_mlp(feats_in, ori + v_feats + channel_embed)
             else:
                 feats = self.diff_mlp(feats_in, ori + channel_embed)
         else: # False
-            ori = x["ori"].unsqueeze(1) # [B, 1]
-            ori = self.ori_embedder(ori) # [B, 21]
-            ori = einops.repeat(ori, "b c -> b t c", t=max_len)
+            # ori = x["rot"].unsqueeze(1) # [B, 1]
+            ori = x["rot"]
+            ori = self.ori_embedder(ori) # [B, 21] / [B, 63]
+            ori = einops.repeat(ori, "b c -> b t c", t=max_len) # [1, 22050, 63]
             feats = torch.cat([feats_in, ori], dim=2)
             if self.visual:
                 feats = self.diff_mlp(feats, v_feats + channel_embed)
@@ -101,15 +113,16 @@ class ANeRF(nn.Module):
             else:
                 feats = self.diff_mlp(feats_in, ori + channel_embed)
         else:
-            ori = x["ori"].unsqueeze(1) # [B, 1]
-            ori = self.ori_embedder(ori) # [B, 21]
-            ori = einops.repeat(ori, "b c -> b t c", t=max_len)
-            feats = torch.cat([feats_in, ori], dim=2)
+            # ori = x["rot"].unsqueeze(1) # [B, 1] / [1, 1, 3]
+            ori = x["rot"] 
+            ori = self.ori_embedder(ori) # [B, 21] / [B, 63]
+            ori = einops.repeat(ori, "b c -> b t c", t=max_len) # # [1, 22050, 63]
+            feats = torch.cat([feats_in, ori], dim=2) # [1, 22050, 319]
             if self.visual:
                 feats = self.diff_mlp(feats, v_feats + channel_embed)
             else:
                 feats = self.diff_mlp(feats, channel_embed)
-        prd_right_wav = self.diff_prj(feats).squeeze(-1) # [B, T]
+        prd_right_wav = self.diff_prj(feats).squeeze(-1) # [B, T] / [1,]
 
         return {"left": prd_left_wav,
                 "right": prd_right_wav}

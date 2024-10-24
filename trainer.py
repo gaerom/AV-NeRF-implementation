@@ -13,7 +13,6 @@ from tensorboardX import SummaryWriter
 import torch
 import torch.nn.functional as F
 import torch.distributed as dist
-import torchaudio
 
 import soundfile as sf
 
@@ -334,10 +333,10 @@ class Trainer(object):
             pred_magnitude = torch.abs(mag_bi_pred)
             loss = F.mse_loss(pred_magnitude, gt_magnitude)  # L2 Loss
 
-            # Griffin-Lim으로 시간 도메인 신호 복원 (저장 및 분석용)
-            wav_pred_left = self.griffin_lim(ret["left"])
-            wav_pred_right = self.griffin_lim(ret["right"])
-            pred_rir = torch.stack([wav_pred_left, wav_pred_right], dim=1)  # [B, 2, T]
+            # # Griffin-Lim으로 시간 도메인 신호 복원 (저장 및 분석용)
+            # wav_pred_left = self.griffin_lim(ret["left"])
+            # wav_pred_right = self.griffin_lim(ret["right"])
+            # pred_rir = torch.stack([wav_pred_left, wav_pred_right], dim=1)  # [B, 2, T]
 
             # 최종 Loss 업데이트 및 최적화
             self.optimizer.zero_grad()
@@ -350,51 +349,218 @@ class Trainer(object):
             self.iter_count += 1
         t.close()
 
+    # def eval(self, val_loader, save=False):
+    #     self.model.eval()
+        
+    #     with torch.no_grad():
+    #         t = tqdm(total=len(val_loader), desc=f"[EPOCH {self.epoch} EVAL]", leave=False)
+    #         for data_idx, data in enumerate(val_loader):
+    #             for k in data.keys():
+    #                 data[k] = data[k].float().to(self.device)
+    #             ret = self.model(data)
+
+    #             # Ground truth와 예측값을 STFT로 변환
+    #             # data["gt_data"].shape: [1, 2, 257, 59]
+
+    #             ### add
+    #             gt_data = data["gt_data"]
+    #             gt_data_for_stft = gt_data[0, :, :, :] # [2, 257, 59]
+
+    #             stft_outputs = []
+
+    #             for i in range(gt_data_for_stft.shape[0]):  # 채널 수만큼 반복
+    #                 signal = gt_data_for_stft[i, :, :]  # [257, 59]
+
+    #                 padding = self.n_fft - signal.shape[-1]  ### padding 적용 수정 필요
+    #                 if padding > 0:
+    #                     signal = torch.nn.functional.pad(signal, (0, padding)) # [257, 512]
+                    
+    #                 # torch.stft 적용 (입력 데이터가 1D가 아니므로 적절히 수정 필요)
+    #                 stft_output = torch.stft(signal, n_fft=self.n_fft, hop_length=self.hop_length, win_length=self.win_length, return_complex=False)
+    #                 stft_outputs.append(stft_output)
+                    
+    #                 # print(stft_output.shape)
+
+    #             stft_outputs = torch.stack(stft_outputs, dim=0)
+
+    #             # mag_bi_gt = torch.stft(data["gt_data"], n_fft=self.n_fft, hop_length=self.hop_length, win_length=self.win_length, return_complex=False)
+    #             mag_bi_gt = stft_outputs # [2, 257, 257, 5, 2]
+    #             # mag_bi_pred = torch.stft(ret["reconstr"], n_fft=self.n_fft, hop_length=self.hop_length, win_length=self.win_length, return_complex=False)
+                
+    #             ################################# pred ##########################################
+    #             # ret[left]: [1, 22050]
+    #             # ret[right]: [1, 22050]
+    #             # for i in range(ret["reconstr"].shape[1]):  # 각 채널에 대해 동일한 과정 적용
+    #             #     signal_pred = ret["reconstr"][0, i, :, :]  # [257, t]
+    #             #     padding_pred = max(0, self.n_fft - signal_pred.shape[-1])
+    #             #     if padding_pred > 0:
+    #             #         signal_pred = torch.nn.functional.pad(signal_pred, (0, padding_pred))
+                    
+    #             #     stft_output_pred = torch.stft(signal_pred, n_fft=self.n_fft, hop_length=self.hop_length, win_length=self.win_length, return_complex=False)
+    #             #     mag_bi_pred.append(stft_output_pred)
+
+    #             # # stft 결과 결합
+    #             # mag_bi_pred = torch.stack(mag_bi_pred, dim=0)
+
+    #             ### ret.keys(): 'left', 'right'
+    #             mag_bi_pred_left = torch.stft(ret["left"], n_fft=self.n_fft, hop_length=self.hop_length, 
+    #                                           win_length=self.win_length, return_complex=False) # [1, 257, 173, 2]
+    #             mag_bi_pred_right = torch.stft(ret["right"], n_fft=self.n_fft, hop_length=self.hop_length, 
+    #                                            win_length=self.win_length, return_complex=False) # [1, 257, 173, 2]
+
+    #             mag_bi_pred = torch.cat([mag_bi_pred_left.unsqueeze(1), 
+    #                                      mag_bi_pred_right.unsqueeze(1)], dim=1) # [1, 2, 257, 173, 2] -> 2-channels
+
+            
+    #             # magnitude L2 Loss
+    #             # mag_bi_gt: [2, 257, 257, 5, 2]
+    #             # mag_bi_pred: [1, 2, 257, 173, 2]
+    #             gt_magnitude = torch.abs(mag_bi_gt)
+    #             pred_magnitude = torch.abs(mag_bi_pred)
+
+    #             ####################################### 수정해야 함 #####################################################
+    #             min_size_batch = min(gt_magnitude.shape[0], pred_magnitude.shape[0])
+    #             min_size_channel = min(gt_magnitude.shape[1], pred_magnitude.shape[1])  
+    #             min_size_freq = min(gt_magnitude.shape[-3], pred_magnitude.shape[-3])  
+
+                
+    #             gt_magnitude = gt_magnitude[:min_size_batch, :min_size_channel, :min_size_freq, :, :]
+    #             pred_magnitude = pred_magnitude[:min_size_batch, :min_size_channel, :min_size_freq, :, :]
+
+    #             min_size_time = min(gt_magnitude.shape[-2], pred_magnitude.shape[-2])
+    #             gt_magnitude = gt_magnitude[..., :min_size_time, :]
+    #             pred_magnitude = pred_magnitude[..., :min_size_time, :]
+
+    #             ######################################################################################################
+
+    #             loss = F.mse_loss(pred_magnitude, gt_magnitude)  # L2 Loss (차원 일치하도록 수정)
+
+    #             # Griffin-Lim -> 이거 필요 X
+    #             # wav_pred_left = self.griffin_lim(ret["left"]) # [1, 22050]
+    #             # wav_pred_right = self.griffin_lim(ret["right"]) # [1, 22050]
+    #             # pred_rir = torch.stack([wav_pred_left, wav_pred_right], dim=1)  # [B, 2, T]
+
+    #             prd_left_wav = ret["left"]  # left chennal 
+    #             prd_right_wav = ret["right"]  # right chennal
+
+    #             prd_stereo_wav = torch.stack([prd_left_wav, prd_right_wav], dim=1)
+    #             gt_stereo_wav = data["gt_data"]
+
+    #             # T60, EDT, C50 
+    #             metrics = self.evaluator.get_full_metrics(
+    #                 prd_stereo_wav.cpu().numpy(),  # 예측 스테레오 오디오 신호
+    #                 gt_stereo_wav.cpu().numpy(),   # Ground truth 스테레오 신호
+    #                 data["gt_data"].cpu().numpy(),  # Ground truth IR
+    #                 prd_stereo_wav.cpu().numpy(),  # 예측 IR
+    #                 log_prd=None, log_gt=None    
+    #             )
+
+    #             # 메트릭 결과 출력
+    #             print(f"T60 Mean Error: {metrics['audio_T60_mean_error']}, EDT: {metrics['audio_EDT']}, C50: {metrics['audio_C50']}")
+
+    #             # 평가 결과 저장 및 리포트
+    #             t.update()
+    #         t.close()
+    #     result = self.evaluator.report()
+    #     if hasattr(self, "writer"):
+    #         for k, v in result.items():
+    #             self.writer.add_scalar(f"eval/{k}", v, self.epoch)
+    #     return result
+    # def eval(self, val_loader, save=False):
+    #     self.model.eval()
+
+    #     with torch.no_grad():
+    #         t = tqdm(total=len(val_loader), desc=f"[EPOCH {self.epoch} EVAL]", leave=False)
+    #         for data_idx, data in enumerate(val_loader):
+    #             for k in data.keys():
+    #                 data[k] = data[k].float().to(self.device)
+
+    #             # A-NeRF 모델의 예측 값 가져오기
+    #             ret = self.model(data)
+
+    #             # Left, Right 채널로부터 스테레오 오디오 신호 결합
+    #             prd_left_wav = ret["left"]  # 왼쪽 채널 (예측 신호)
+    #             prd_right_wav = ret["right"]  # 오른쪽 채널 (예측 신호)
+    #             prd_stereo_wav = torch.stack([prd_left_wav, prd_right_wav], dim=1)  # 스테레오 신호 결합 [B, 2, T]
+
+    #             # Ground Truth 스테레오 신호 가져오기
+    #             gt_stereo_wav = data["gt_data"]  # Ground truth 스테레오 신호 [B, 2, T]
+
+    #             # 메트릭 계산 (T60, EDT, C50)
+    #             metrics = self.evaluator.get_full_metrics(
+    #                 prd_stereo_wav.cpu().numpy(),  # 예측 스테레오 오디오 신호
+    #                 gt_stereo_wav.cpu().numpy(),   # Ground truth 스테레오 신호
+    #                 gt_stereo_wav.cpu().numpy(),   # Ground truth IR
+    #                 prd_stereo_wav.cpu().numpy(),  # 예측 IR
+    #                 gt_stereo_wav.cpu().numpy(),   # Ground truth IR
+    #                 log_prd=None, log_gt=None      # 로그 값은 사용하지 않음
+    #             )
+
+    #             # 메트릭 결과 출력
+    #             print(f"T60 Mean Error: {metrics['audio_T60_mean_error']}, EDT: {metrics['audio_EDT']}, C50: {metrics['audio_C50']}")
+
+    #             # 평가 결과 저장 및 리포트
+    #             t.update()
+    #         t.close()
+
+    #     # result = self.evaluator.report()
+    #     # if hasattr(self, "writer"):
+    #     #     for k, v in result.items():
+    #     #         self.writer.add_scalar(f"eval/{k}", v, self.epoch)
+    #     return
+
     def eval(self, val_loader, save=False):
         self.model.eval()
-        
+
+        t60_errors = []
+        edt_values = []
+        c50_values = []
+
         with torch.no_grad():
             t = tqdm(total=len(val_loader), desc=f"[EPOCH {self.epoch} EVAL]", leave=False)
             for data_idx, data in enumerate(val_loader):
                 for k in data.keys():
                     data[k] = data[k].float().to(self.device)
+
+                # A-NeRF 모델의 예측 값 가져오기
                 ret = self.model(data)
 
-                # Ground truth와 예측값을 STFT로 변환
-                mag_bi_gt = torch.stft(data["wav_bi"], n_fft=self.n_fft, hop_length=self.hop_length, win_length=self.win_length, return_complex=False)
-                mag_bi_pred = torch.stft(ret["reconstr"], n_fft=self.n_fft, hop_length=self.hop_length, win_length=self.win_length, return_complex=False)
+                # Left, Right 채널로부터 스테레오 오디오 신호 결합
+                prd_left_wav = ret["left"]  # 왼쪽 채널 (예측 신호)
+                prd_right_wav = ret["right"]  # 오른쪽 채널 (예측 신호)
+                prd_stereo_wav = torch.stack([prd_left_wav, prd_right_wav], dim=1)  # 스테레오 신호 결합 [B, 2, T]
 
-                # 크기 정보만 사용해 L2 Loss 계산
-                gt_magnitude = torch.abs(mag_bi_gt)
-                pred_magnitude = torch.abs(mag_bi_pred)
-                loss = F.mse_loss(pred_magnitude, gt_magnitude)  # L2 Loss
+                # Ground Truth 스테레오 신호 가져오기
+                gt_stereo_wav = data["gt_data"]  # Ground truth 스테레오 신호 [B, 2, T]
 
-                # Griffin-Lim으로 시간 도메인 신호 복원
-                wav_pred_left = self.griffin_lim(ret["left"])
-                wav_pred_right = self.griffin_lim(ret["right"])
-                pred_rir = torch.stack([wav_pred_left, wav_pred_right], dim=1)  # [B, 2, T]
-
-                # T60, EDT, C50 메트릭 계산
+                # 메트릭 계산 (T60, EDT, C50)
                 metrics = self.evaluator.get_full_metrics(
-                    mag_bi_pred.cpu().numpy(), 
-                    mag_bi_gt.cpu().numpy(),
-                    data["wav_bi"].cpu().numpy(),  # 원래 ground truth IR
-                    pred_rir.cpu().numpy(),         # 복원된 예측 IR
-                    data["wav_bi"].cpu().numpy(),   # 원래 ground truth IR
-                    log_prd=None, log_gt=None       # 로그 값은 사용하지 않음
+                    prd_stereo_wav.cpu().numpy(),  # 예측 스테레오 오디오 신호
+                    gt_stereo_wav.cpu().numpy(),   # Ground truth 스테레오 신호
+                    gt_stereo_wav.cpu().numpy(),   # Ground truth IR
+                    prd_stereo_wav.cpu().numpy(),  # 예측 IR
+                    gt_stereo_wav.cpu().numpy(),   # Ground truth IR
+                    log_prd=None, log_gt=None      # 로그 값은 사용하지 않음
                 )
 
-                # 메트릭 결과 출력
-                print(f"T60 Mean Error: {metrics['audio_T60_mean_error']}, EDT: {metrics['audio_EDT']}, C50: {metrics['audio_C50']}")
+                t60_errors.append(metrics['audio_T60_mean_error'])
+                edt_values.append(metrics['audio_EDT'])
+                c50_values.append(metrics['audio_C50'])
 
-                # 평가 결과 저장 및 리포트
+                # tqdm 업데이트
                 t.update()
             t.close()
-        result = self.evaluator.report()
-        if hasattr(self, "writer"):
-            for k, v in result.items():
-                self.writer.add_scalar(f"eval/{k}", v, self.epoch)
-        return result
+
+        avg_t60_error = np.mean(t60_errors)
+        avg_edt = np.mean(edt_values)
+        avg_c50 = np.mean(c50_values)
+
+        print(f"T60: {avg_t60_error}, C50: {avg_c50}, EDT: {avg_edt}")
+
+        return
+
+    
+
 
     def save_ckpt(self):
         try:
