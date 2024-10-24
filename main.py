@@ -13,11 +13,12 @@ import torch.backends.cudnn as cudnn
 import torch.nn.functional as F
 
 # from data import RWAVSDataset
-from dataloader import SoundSpaces
+from dataloader import SoundSpaces, pad_collate_fn
 from trainer import Trainer
 # from model import ANeRF
 from anerf import ANeRF # RIR Prediction
 
+### ver.1
 
 # def parse_args():
 #     parser = argparse.ArgumentParser()
@@ -203,12 +204,13 @@ def main():
     model.to(device)
 
     data_root = args.data_root
-    data_loader = SoundSpaces(dataset_dir=os.path.join(data_root, "apartment_test/binaural_magnitudes_sr22050"), 
-                              split_file=os.path.join(data_root, "apartment_test/metadata_AudioNeRF/split.json"))
+    data_loader = SoundSpaces(dataset_dir=os.path.join(data_root, "apartment_1/binaural_magnitudes_sr22050"), 
+                              split_file=os.path.join(data_root, "apartment_1/metadata_AudioNeRF/split.json"))
     
     if args.eval:
         val_data = data_loader.load_data(split='test')  
-        val_dataloader = torch.utils.data.DataLoader(val_data, batch_size=args.batch_size, num_workers=args.num_workers, shuffle=False, drop_last=False, pin_memory=True)
+        val_dataloader = torch.utils.data.DataLoader(val_data, batch_size=args.batch_size, 
+                                                     num_workers=args.num_workers, shuffle=True, drop_last=False, pin_memory=True)
 
         ckpt_path = os.path.join(args.log_dir, args.output_dir if args.output_dir else f"{args.batch_size}_{args.lr}/", f"{99}.pth")
         checkpoint = torch.load(ckpt_path, map_location=device)
@@ -231,8 +233,10 @@ def main():
     else:
         train_data = data_loader.load_data(split='train') # len(train_data): 12391
         val_data = data_loader.load_data(split='test')  # 12391?
-        train_dataloader = torch.utils.data.DataLoader(train_data, batch_size=args.batch_size, num_workers=args.num_workers, shuffle=True, drop_last=True, pin_memory=False)
-        val_dataloader = torch.utils.data.DataLoader(val_data, batch_size=args.batch_size, num_workers=args.num_workers, shuffle=False, drop_last=False, pin_memory=False)
+        train_dataloader = torch.utils.data.DataLoader(train_data, batch_size=args.batch_size, num_workers=args.num_workers, 
+                                                    shuffle=True, drop_last=True, pin_memory=False, collate_fn=pad_collate_fn)
+        val_dataloader = torch.utils.data.DataLoader(val_data, batch_size=args.batch_size, num_workers=args.num_workers,
+                                                    shuffle=False, drop_last=False, pin_memory=False, collate_fn=pad_collate_fn)
 
 
         if args.resume_path:

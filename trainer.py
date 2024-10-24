@@ -16,6 +16,8 @@ import torch.distributed as dist
 
 import soundfile as sf
 
+
+### ver.1
 # from utils import energy_decay, istft, Evaluator
 
 # class Trainer(object):
@@ -319,24 +321,44 @@ class Trainer(object):
         self.model.train()
         t = tqdm(total=len(train_loader), desc=f"[EPOCH {self.epoch} TRAIN]", leave=False)
         self.writer.add_scalar("epoch", self.epoch, self.epoch)
+        
         for data in train_loader:
             for k in data.keys():
-               data[k] = data[k].float().to(self.device)
+                data[k] = data[k].float().to(self.device)
+
+            # A-NeRF 모델의 예측 값 가져오기
             ret = self.model(data)
 
-            # Ground truth와 예측값을 STFT로 변환
-            mag_bi_gt = torch.stft(data["wav_bi"], n_fft=self.n_fft, hop_length=self.hop_length, win_length=self.win_length, return_complex=False)
-            mag_bi_pred = torch.stft(ret["reconstr"], n_fft=self.n_fft, hop_length=self.hop_length, win_length=self.win_length, return_complex=False)
+            # Ground truth와 예측 값에서 크기 정보 추출
+            mag_bi_gt = torch.abs(data["gt_data"])  # [B, 2, 257, 69] 형태로 추출
             
-            # 크기 정보만 사용해 L2 Loss 계산
-            gt_magnitude = torch.abs(mag_bi_gt)
-            pred_magnitude = torch.abs(mag_bi_pred)
-            loss = F.mse_loss(pred_magnitude, gt_magnitude)  # L2 Loss
+            # 예측 신호에 대해 STFT 적용
+            mag_bi_pred_left = torch.stft(ret["left"], n_fft=self.n_fft, hop_length=self.hop_length, 
+                                        win_length=self.win_length, return_complex=True)  # 복소수 형태로 STFT 수행
+            mag_bi_pred_right = torch.stft(ret["right"], n_fft=self.n_fft, hop_length=self.hop_length, 
+                                        win_length=self.win_length, return_complex=True)  # 복소수 형태로 STFT 수행
+            
+            # STFT 결과를 복소수 텐서에서 실수 텐서로 변환
+            mag_bi_pred_left = torch.view_as_real(mag_bi_pred_left)  # [B, 257, ?, 2]
+            mag_bi_pred_right = torch.view_as_real(mag_bi_pred_right)  # [B, 257, ?, 2]
 
-            # # Griffin-Lim으로 시간 도메인 신호 복원 (저장 및 분석용)
-            # wav_pred_left = self.griffin_lim(ret["left"])
-            # wav_pred_right = self.griffin_lim(ret["right"])
-            # pred_rir = torch.stack([wav_pred_left, wav_pred_right], dim=1)  # [B, 2, T]
+            # 예측된 스펙트로그램 결합
+            mag_bi_pred = torch.cat([mag_bi_pred_left.unsqueeze(1), 
+                                    mag_bi_pred_right.unsqueeze(1)], dim=1)  # [B, 2, 257, ?, 2]
+
+            # 예측 값에서 마지막 차원을 제거하여 크기를 맞춤
+            pred_magnitude = mag_bi_pred[..., 0]  # [B, 2, 257, ?]
+            
+            # Ground truth 크기 정보 추출
+            gt_magnitude = torch.abs(mag_bi_gt)  # [B, 2, 257, 69]
+
+            # Ground truth와 예측 값의 시간 길이를 맞춤
+            min_time_len = min(gt_magnitude.shape[-1], pred_magnitude.shape[-1])
+            gt_magnitude = gt_magnitude[..., :min_time_len]
+            pred_magnitude = pred_magnitude[..., :min_time_len]
+
+            # L2 손실 계산
+            loss = F.mse_loss(pred_magnitude, gt_magnitude)
 
             # 최종 Loss 업데이트 및 최적화
             self.optimizer.zero_grad()
@@ -348,6 +370,9 @@ class Trainer(object):
             t.update()
             self.iter_count += 1
         t.close()
+
+
+
 
     # def eval(self, val_loader, save=False):
     #     self.model.eval()

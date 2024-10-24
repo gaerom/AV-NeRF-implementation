@@ -8,6 +8,7 @@ import torch.nn.functional as F
 
 from torchaudio.transforms import GriffinLim # for predicted RIR
 
+### ver.1
 class ANeRF(nn.Module):
     def __init__(self,
                  visual=False,

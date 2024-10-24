@@ -8,6 +8,8 @@ from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor
 
+### ver.1
+
 ### DataLoader for SoundSpaces (수정중)
 
 # class SoundSpaces:
@@ -187,8 +189,8 @@ def pad_collate_fn(batch):
 
 
 
-dataset_dir = 'SoundSpaces/apartment_test/binaural_magnitudes_sr22050'
-split_file = 'SoundSpaces/apartment_test/metadata_AudioNeRF/split.json'
+dataset_dir = 'SoundSpaces/apartment_1/binaural_magnitudes_sr22050'
+split_file = 'SoundSpaces/apartment_1/metadata_AudioNeRF/split.json'
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 
